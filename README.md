@@ -4,6 +4,17 @@ Windows toast notifications and louder sounds for [Claude Code](https://code.cla
 
 ![Three notifications: Claude finished, Claude has a question, Claude needs your approval](docs/screenshot.png)
 
+## What's different
+
+There are a few Windows notifiers for Claude Code. Doorbell is built around these:
+
+- **A plugin, not a script to copy.** One line installs it, Claude Code's plugin manager updates it, and there is no `settings.json` to edit.
+- **It tells you which session.** Each pop-up names the session (your `/rename` name, or Claude Code's own title), which matters when several are running at once.
+- **Your prompts stay off the screen.** The question or command never appears in the pop-up or the notification center.
+- **It rings until you answer, then stops.** Questions and approvals stay on screen until you deal with them, clear themselves once answered or when the turn ends, and each session keeps at most one pop-up, so they never pile up.
+- **You see every option you were offered.** After you answer a question, a recap lists all of its options with your picks marked.
+- **Nothing to install.** It runs on the PowerShell built into Windows, and the louder sounds are made on your machine from the standard Windows sounds.
+
 ## What you get
 
 | When | Pop-up | Stays on screen | Sound |
