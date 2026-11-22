@@ -1,6 +1,8 @@
 # Doorbell: Windows notifications for Claude Code
 
-Windows toast notifications and louder sounds for [Claude Code](https://code.claude.com), so you notice when Claude needs you or has finished, even with the terminal buried under other windows. Like a doorbell, it rings when someone is waiting for you and stops once you answer. As a bonus, after you answer one of Claude's questions you get a recap of every option it offered, not just the one you picked.
+You give Claude a task, switch to another window while it works, and come back twenty minutes later to find it stopped after thirty seconds to ask a yes-or-no question. With three sessions open, you also have to work out which one was waiting.
+
+Doorbell rings instead. The moment [Claude Code](https://code.claude.com) needs you, a Windows pop-up and a sound tell you which session is waiting, and when it finishes you get a chime and a short pop-up. Like a real doorbell, it rings when someone is waiting, and the pop-up stays until you answer. As a bonus, after you answer one of Claude's questions you get a recap of every option it offered, not just the one you picked.
 
 ![Three notifications: Claude finished, Claude has a question, Claude needs your approval](docs/screenshot.png)
 
