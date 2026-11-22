@@ -1,6 +1,6 @@
-# Windows notifications for Claude Code
+# Doorbell: Windows notifications for Claude Code
 
-Windows toast notifications and louder sounds for [Claude Code](https://code.claude.com), so you notice when Claude needs you or has finished, even with the terminal buried under other windows. As a bonus, after you answer one of Claude's questions you get a recap of every option it offered, not just the one you picked.
+Windows toast notifications and louder sounds for [Claude Code](https://code.claude.com), so you notice when Claude needs you or has finished, even with the terminal buried under other windows. Like a doorbell, it rings when someone is waiting for you and stops once you answer. As a bonus, after you answer one of Claude's questions you get a recap of every option it offered, not just the one you picked.
 
 ![Three notifications: Claude finished, Claude has a question, Claude needs your approval](docs/screenshot.png)
 
@@ -47,20 +47,20 @@ This started as two sound hooks in my own Claude Code settings, so I'd hear when
 At the Claude Code prompt:
 
 ```
-/plugin install windows-notify --marketplace davidalexander24/claude-code-windows-notify
+/plugin install doorbell --marketplace davidalexander24/claude-code-doorbell
 ```
 
 Answer `y` to add the marketplace, then pick a scope. From a shell instead:
 
 ```
-claude plugin install windows-notify --marketplace davidalexander24/claude-code-windows-notify
+claude plugin install doorbell --marketplace davidalexander24/claude-code-doorbell
 ```
 
 If your Claude Code doesn't know `--marketplace` yet:
 
 ```
-/plugin marketplace add davidalexander24/claude-code-windows-notify
-/plugin install windows-notify@claude-code-windows-notify
+/plugin marketplace add davidalexander24/claude-code-doorbell
+/plugin install doorbell@claude-code-doorbell
 ```
 
 Then restart Claude Code (or run `/reload-plugins`) so the hooks load.
@@ -101,7 +101,7 @@ The plugin adds three hooks, all running [`scripts/notify.ps1`](scripts/notify.p
 | `Stop` | Claude finishes its turn | "finished" pop-up, chime |
 | `PostToolUse` on `AskUserQuestion` | you answered a question | clears the question pop-up, prints the recap |
 
-Pop-ups use the Windows notification API through PowerShell's WinRT support, under an app identity registered at `HKCU\Software\Classes\AppUserModelId\ClaudeCodeWindowsNotify`. Boosted sounds and a copy of the icons are kept in `%LOCALAPPDATA%\claude-code-windows-notify`, along with `notify.log` if anything goes wrong.
+Pop-ups use the Windows notification API through PowerShell's WinRT support, under an app identity registered at `HKCU\Software\Classes\AppUserModelId\ClaudeCodeDoorbell`. Boosted sounds and a copy of the icons are kept in `%LOCALAPPDATA%\claude-code-doorbell`, along with `notify.log` if anything goes wrong.
 
 The session name comes from the session's transcript and from `~/.claude/sessions`. These are Claude Code's internal files and may change between versions; if the name can't be found, the pop-up shows the folder name instead.
 
@@ -119,7 +119,7 @@ The session name comes from the session's transcript and from `~/.claude/session
 No pop-up at all:
 
 1. Check **Settings → System → Notifications**: notifications on, **Claude Code** allowed, Do Not Disturb off.
-2. Look in `%LOCALAPPDATA%\claude-code-windows-notify\notify.log`.
+2. Look in `%LOCALAPPDATA%\claude-code-doorbell\notify.log`.
 3. From a clone of this repo, fire one by hand:
 
    ```powershell
@@ -129,14 +129,14 @@ No pop-up at all:
 ## Uninstall
 
 ```
-claude plugin uninstall windows-notify
+claude plugin uninstall doorbell
 ```
 
 To also remove the cached sounds and icons and the app identity:
 
 ```powershell
-Remove-Item -Recurse "$env:LOCALAPPDATA\claude-code-windows-notify"
-Remove-Item "HKCU:\Software\Classes\AppUserModelId\ClaudeCodeWindowsNotify"
+Remove-Item -Recurse "$env:LOCALAPPDATA\claude-code-doorbell"
+Remove-Item "HKCU:\Software\Classes\AppUserModelId\ClaudeCodeDoorbell"
 ```
 
 ## License

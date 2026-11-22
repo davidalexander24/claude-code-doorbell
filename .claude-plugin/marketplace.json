@@ -1,10 +1,10 @@
 {
-  "name": "claude-code-windows-notify",
+  "name": "claude-code-doorbell",
   "owner": { "name": "David Alexander", "url": "https://github.com/davidalexander24" },
-  "description": "Windows notifications for Claude Code: toast pop-ups, louder sounds and a question recap",
+  "description": "Doorbell: Windows notifications for Claude Code, with toast pop-ups, louder sounds and a question recap",
   "plugins": [
     {
-      "name": "windows-notify",
+      "name": "doorbell",
       "source": "./",
       "description": "Windows toast notifications and louder sounds when Claude needs you or finishes, plus a full recap of answered questions"
     }

@@ -1,11 +1,11 @@
 {
-  "name": "windows-notify",
+  "name": "doorbell",
   "version": "0.1.0",
   "description": "Windows toast notifications and louder sounds when Claude needs you or finishes, plus a full recap of answered questions",
   "author": { "name": "David Alexander", "url": "https://github.com/davidalexander24" },
-  "homepage": "https://github.com/davidalexander24/claude-code-windows-notify",
-  "repository": "https://github.com/davidalexander24/claude-code-windows-notify",
+  "homepage": "https://github.com/davidalexander24/claude-code-doorbell",
+  "repository": "https://github.com/davidalexander24/claude-code-doorbell",
   "license": "MIT",
-  "keywords": ["windows", "notifications", "toast", "sound", "hooks", "AskUserQuestion"],
+  "keywords": ["windows", "notifications", "toast", "sound", "hooks", "AskUserQuestion", "doorbell"],
   "network": { "hosts": [] }
 }

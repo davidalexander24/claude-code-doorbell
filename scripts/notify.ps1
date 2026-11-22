@@ -1,5 +1,5 @@
-# claude-code-windows-notify
-# Windows toast notifications and louder sounds for Claude Code, run from the plugin's hooks.
+# Doorbell: Windows notifications for Claude Code
+# Windows toast notifications and louder sounds, run from the plugin's hooks.
 #
 #   -Kind attention  PermissionRequest: Claude needs approval, asks a question
 #                    (AskUserQuestion) or has a plan to review (ExitPlanMode).
@@ -10,16 +10,16 @@
 #
 # Toasts show the session name (the /rename name, else Claude's auto title), never
 # the question or the command. Reads the hook JSON on stdin and never blocks Claude:
-# errors go to %LOCALAPPDATA%\claude-code-windows-notify\notify.log.
+# errors go to %LOCALAPPDATA%\claude-code-doorbell\notify.log.
 param(
     [ValidateSet('attention', 'done', 'answered')]
     [string]$Kind = 'attention'
 )
 
 $ErrorActionPreference = 'Stop'
-$appId = 'ClaudeCodeWindowsNotify'
+$appId = 'ClaudeCodeDoorbell'
 $assets = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets'
-$cache = Join-Path $env:LOCALAPPDATA 'claude-code-windows-notify'
+$cache = Join-Path $env:LOCALAPPDATA 'claude-code-doorbell'
 $log = Join-Path $cache 'notify.log'
 
 # --- Settings (environment variables, e.g. from the "env" block of settings.json) ---
