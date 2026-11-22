@@ -14,6 +14,7 @@ There are a few Windows notifiers for Claude Code. Doorbell is built around thes
 - **It rings until you answer, then stops.** Questions and approvals stay on screen until you deal with them, clear themselves once answered or when the turn ends, and each session keeps at most one pop-up, so they never pile up.
 - **You see every option you were offered.** After you answer a question, a recap lists all of its options with your picks marked.
 - **Nothing to install.** It runs on the PowerShell built into Windows, and the louder sounds are made on your machine from the standard Windows sounds.
+- **No cost to Claude's context.** It is hooks only, so it adds nothing to what Claude reads (`claude plugin details` puts it at about 0 tokens per session).
 
 ## What you get
 
@@ -23,8 +24,7 @@ There are a few Windows notifiers for Claude Code. Doorbell is built around thes
 | Claude needs approval, or has a plan to review | orange **!** "Claude needs your approval" | until you dismiss it | alert |
 | Claude finishes its turn | green **✓** "Claude finished" | about 5 seconds | chime |
 
-- **Shows which session, not what it asked.** The pop-up shows the session's name (your `/rename` name, otherwise Claude Code's own title for it) and the folder or session handle. The question and the command never appear, so nothing sensitive sits on your screen.
-- **Never piles up.** Each session keeps at most one pop-up of each kind: a new one replaces the old one, answering a question clears its pop-up, and a finished turn clears a pending question.
+- **Which session, at a glance.** Under the title, the pop-up shows the session's name and, in small grey text, the folder or session handle.
 - **Louder sounds.** The standard Windows sounds, boosted by 14 dB by default. The boosted copies are made on your machine the first time they play, so no sound files ship with the plugin.
 - **Question recap.** Claude Code normally keeps only "question → answer" once you reply. This adds every question with all of its options, your picks marked:
 
@@ -51,7 +51,8 @@ This started as two sound hooks in my own Claude Code settings, so I'd hear when
 ## Requirements
 
 - Windows 10 or 11, with the built-in Windows PowerShell 5.1. Nothing else to install.
-- A recent Claude Code with plugin support. Tested on 2.1.330.
+- A recent Claude Code with plugin support.
+- Tested on Windows 11 23H2 with Claude Code 2.1.330.
 
 ## Install
 
