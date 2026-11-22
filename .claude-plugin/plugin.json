@@ -1,0 +1,11 @@
+{
+  "name": "windows-notify",
+  "version": "0.1.0",
+  "description": "Windows toast notifications and louder sounds when Claude needs you or finishes, plus a full recap of answered questions",
+  "author": { "name": "David Alexander", "url": "https://github.com/davidalexander24" },
+  "homepage": "https://github.com/davidalexander24/claude-code-windows-notify",
+  "repository": "https://github.com/davidalexander24/claude-code-windows-notify",
+  "license": "MIT",
+  "keywords": ["windows", "notifications", "toast", "sound", "hooks", "AskUserQuestion"],
+  "network": { "hosts": [] }
+}
