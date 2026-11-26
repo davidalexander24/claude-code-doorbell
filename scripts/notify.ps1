@@ -3,14 +3,16 @@
 #
 #   -Kind attention  PermissionRequest: Claude needs approval, asks a question
 #                    (AskUserQuestion) or has a plan to review (ExitPlanMode).
-#                    Orange badge, stays on screen until dismissed, alert sound.
+#                    Orange badge and alert sound. The toast stays on screen until you
+#                    respond: the script keeps watching the session and removes it then.
 #   -Kind done       Stop: Claude finished its turn. Green badge, short toast, chime.
 #   -Kind answered   PostToolUse on AskUserQuestion: removes the question toast and
 #                    prints a recap of every question with all of its options.
 #
-# Toasts show the session name (the /rename name, else Claude's auto title), never
-# the question or the command. Reads the hook JSON on stdin and never blocks Claude:
-# errors go to %LOCALAPPDATA%\claude-code-doorbell\notify.log.
+# Clicking a toast opens a doorbell: link, handled by focus.ps1, which brings up the
+# session's terminal tab. Toasts show the session name (the /rename name, else Claude's
+# auto title), never the question or the command. Reads the hook JSON on stdin and
+# never blocks Claude: errors go to %LOCALAPPDATA%\claude-code-doorbell\notify.log.
 param(
     [ValidateSet('attention', 'done', 'answered')]
     [string]$Kind = 'attention'
@@ -21,6 +23,7 @@ $appId = 'ClaudeCodeDoorbell'
 $assets = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets'
 $cache = Join-Path $env:LOCALAPPDATA 'claude-code-doorbell'
 $log = Join-Path $cache 'notify.log'
+. (Join-Path $PSScriptRoot 'native.ps1')
 
 # --- Settings (environment variables, e.g. from the "env" block of settings.json) ---
 
@@ -31,6 +34,10 @@ function Get-Setting([string]$name, [string]$default) {
 }
 
 function Test-Off([string]$name) { (Get-Setting $name '1') -in @('0', 'false', 'off', 'no') }
+
+# Debug logging: CC_NOTIFY_DEBUG=1, or an empty file named "debug" in the cache folder
+# (takes effect at once, without restarting Claude Code).
+function Test-Debug { (Get-Setting 'CC_NOTIFY_DEBUG' '0') -eq '1' -or (Test-Path (Join-Path $cache 'debug')) }
 
 function Write-NotifyLog([string]$msg) {
     try {
@@ -160,17 +167,23 @@ function Get-SessionTitle([string]$path) {
     return ''
 }
 
-# The short handle Claude Code gives each running session, e.g. "my-app-3f".
-function Get-SessionHandle([string]$sid) {
-    if (-not $sid) { return '' }
+# Claude Code's record of a running session, ~/.claude/sessions/<pid>.json: its short
+# handle (e.g. "my-app-3f") and its status ("busy"; "waiting" while a question or an
+# approval is open; "idle" between turns).
+function Get-SessionRecord([string]$sid) {
+    if (-not $sid) { return $null }
     $config = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
     foreach ($f in Get-ChildItem (Join-Path $config 'sessions') -Filter *.json -ErrorAction SilentlyContinue) {
         try {
             $s = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
-            if ($s.sessionId -eq $sid -and $s.name) { return [string]$s.name }
+            if ($s.sessionId -eq $sid) { return [pscustomobject]@{ Path = $f.FullName; Name = [string]$s.name } }
         } catch {}
     }
-    return ''
+    return $null
+}
+
+function Get-SessionStatus([string]$path) {
+    try { return [string](Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json).status } catch { return '' }
 }
 
 function Limit-Text([string]$s, [int]$max) {
@@ -184,15 +197,71 @@ function ConvertTo-XmlText([string]$s) { [Security.SecurityElement]::Escape($s) 
 
 # --- Assets and app identity ---------------------------------------------------------
 
-# Copies the icon and badges out of the plugin folder, whose path changes with each
-# version, so the registered icon and toasts in Action Center keep working after updates.
+# Copies the icon, badges and click handler out of the plugin folder, whose path changes
+# with each version, so the registered icon, the doorbell: link and toasts already in
+# Action Center keep working after updates.
 function Sync-Assets {
     if (-not (Test-Path $cache)) { New-Item -ItemType Directory -Force $cache | Out-Null }
-    foreach ($name in 'icon.png', 'badge-done.png', 'badge-question.png', 'badge-approval.png') {
-        $src = Join-Path $assets $name
-        $dst = Join-Path $cache $name
-        if (-not (Test-Path $dst) -or (Get-Item $src).Length -ne (Get-Item $dst).Length) { Copy-Item $src $dst -Force }
+    $files = @('icon.png', 'badge-done.png', 'badge-question.png', 'badge-approval.png' | ForEach-Object { Join-Path $assets $_ }) +
+             @('focus.ps1', 'native.ps1', 'native.cs' | ForEach-Object { Join-Path $PSScriptRoot $_ })
+    foreach ($src in $files) {
+        $dst = Join-Path $cache (Split-Path -Leaf $src)
+        if (-not (Test-Path $dst) -or (Get-FileHash $src).Hash -ne (Get-FileHash $dst).Hash) { Copy-Item $src $dst -Force }
     }
+}
+
+# Registers the doorbell: link that a toast opens when clicked: the compiled click app
+# (focusapp.cs), or focus.ps1 if it can't be built. Windows runs a pop-up's link only
+# when it opens an app, so the script fallback works for direct launches alone.
+function Register-Protocol {
+    $handler = $null
+    try { $handler = Get-DoorbellFocusApp $cache } catch { Write-NotifyLog "click app: $_" }
+    if ($handler) {
+        $command = '"{0}" "%1"' -f $handler
+    } else {
+        $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $command = '"{0}" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{1}" "%1"' -f $powershell, (Join-Path $cache 'focus.ps1')
+    }
+    $key = 'HKCU:\Software\Classes\doorbell'
+    $commandKey = "$key\shell\open\command"
+    if ((Test-Path $commandKey) -and (Get-ItemProperty -Path $commandKey).'(default)' -eq $command) { return }
+    if (-not (Test-Path $commandKey)) { New-Item -Path $commandKey -Force | Out-Null }
+    Set-ItemProperty -Path $key -Name '(default)' -Value 'URL:Doorbell for Claude Code'
+    Set-ItemProperty -Path $key -Name 'URL Protocol' -Value ''
+    Set-ItemProperty -Path $commandKey -Name '(default)' -Value $command
+}
+
+# The terminal window this session runs in, for the click action; 0 if not found.
+function Get-HostWindow {
+    Import-DoorbellNative $cache
+    $claude = [Doorbell.Native]::FindClaudeAncestor([uint32]$PID)
+    if (-not $claude) { return 0 }
+    return [Doorbell.Native]::HostWindow([uint32]$claude)
+}
+
+# Removes this prompt's toast as soon as the session stops waiting, that is, once you
+# answer, approve or reject. If the session never shows as waiting (a permission rule or
+# hook answered the prompt first), the toast is left for the Stop hook to clear.
+function Watch-Prompt([string]$path, [string]$tag, [string]$nonce) {
+    $debug = Test-Debug
+    $start = Get-Date
+    $sawWaiting = $false
+    $last = $null
+    while (((Get-Date) - $start).TotalMinutes -lt 60) {
+        if (-not (Test-Path -LiteralPath $path)) { if ($debug) { Write-NotifyLog 'watch: session record gone' }; break }
+        $status = Get-SessionStatus $path
+        if ($debug -and $status -ne $last) { Write-NotifyLog "watch: status '$status'"; $last = $status }
+        if ($status -eq 'waiting') { $sawWaiting = $true }
+        elseif ($status -and $sawWaiting) { break }
+        elseif (-not $sawWaiting -and ((Get-Date) - $start).TotalSeconds -gt 20) { if ($debug) { Write-NotifyLog 'watch: never waited, leaving the toast' }; return }
+        Start-Sleep -Milliseconds 300
+    }
+    # Only remove the toast if it is still this prompt's; a newer prompt replaces it.
+    $mine = @($history.GetHistory($appId) | Where-Object {
+        $_.Tag -eq $tag -and $_.Group -eq 'attention' -and $_.Content.DocumentElement.GetAttribute('launch') -like "*n=$nonce"
+    })
+    if ($debug) { Write-NotifyLog "watch: done, own toast still shown: $($mine.Count -gt 0)" }
+    if ($mine.Count) { $history.Remove($tag, 'attention', $appId) }
 }
 
 # Registers the app identity so the toast header shows the app name and icon.
@@ -283,9 +352,10 @@ if ($Kind -eq 'done') {
 }
 
 $sessionTitle = ''
-$handle = ''
+$record = $null
 try { $sessionTitle = Get-SessionTitle ([string]$data.transcript_path) } catch { Write-NotifyLog "title: $_" }
-try { $handle = Get-SessionHandle ([string]$data.session_id) } catch { Write-NotifyLog "handle: $_" }
+try { $record = Get-SessionRecord ([string]$data.session_id) } catch { Write-NotifyLog "session: $_" }
+$handle = if ($record) { $record.Name } else { '' }
 $project = if ($data.cwd) { Split-Path -Leaf ([string]$data.cwd) } else { '' }
 
 $body = if ($sessionTitle) { $sessionTitle } elseif ($handle) { $handle } elseif ($project) { $project } else { 'Claude Code session' }
@@ -296,6 +366,22 @@ $footer = if ($handle -and $handle -ne $body) { $handle } elseif ($project -ne $
 try {
     Sync-Assets
     Register-AppId
+
+    # Click action: open the session's terminal tab through the doorbell: link. The id
+    # (n) lets the watcher tell this toast apart from a newer one for the same session.
+    $nonce = [guid]::NewGuid().ToString('N').Substring(0, 12)
+    $launchAttrs = ''
+    try {
+        Register-Protocol
+        $hostWindow = 0
+        if (-not (Test-Off 'CC_NOTIFY_CLICK')) {
+            try { $hostWindow = Get-HostWindow } catch { Write-NotifyLog "window: $_" }
+            if (-not $hostWindow) { Write-NotifyLog 'window: no terminal window found, so clicking this pop-up will do nothing' }
+            elseif (Test-Debug) { Write-NotifyLog "window: $hostWindow" }
+        }
+        $launch = 'doorbell:focus?hwnd={0}&title={1}&n={2}' -f $hostWindow, [Uri]::EscapeDataString($sessionTitle), $nonce
+        $launchAttrs = " launch=""$(ConvertTo-XmlText $launch)"" activationType=""protocol"""
+    } catch { Write-NotifyLog "protocol: $_" }
 
     $badgeUri = ([Uri](Join-Path $cache $badge)).AbsoluteUri
     $attribution = ''
@@ -312,7 +398,7 @@ try {
         }
     }
     $xml = @"
-<toast$toastAttrs>
+<toast$toastAttrs$launchAttrs>
   <visual>
     <binding template="ToastGeneric">
       <text>$(ConvertTo-XmlText $title)</text>
@@ -344,11 +430,26 @@ try {
     [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)
 } catch { Write-NotifyLog "toast: $_" }
 
-# --- Sound -----------------------------------------------------------------------------
+# --- Sound, then watch for your response -------------------------------------------------
 
+$soundStarted = $null
 if (-not (Test-Off 'CC_NOTIFY_SOUND')) {
     try {
         $sound = Get-Sound $(if ($Kind -eq 'done') { 'done' } else { 'attention' })
-        if ($sound) { (New-Object Media.SoundPlayer $sound).PlaySync() }
+        if ($sound) {
+            $player = New-Object Media.SoundPlayer $sound
+            # For a question or approval, play in the background so watching starts at once.
+            if ($Kind -eq 'attention') { $player.Play(); $soundStarted = Get-Date } else { $player.PlaySync() }
+        }
     } catch { Write-NotifyLog "sound: $_" }
+}
+
+if ($Kind -eq 'attention' -and $record -and $history -and -not (Test-Off 'CC_NOTIFY_AUTOCLEAR')) {
+    try { Watch-Prompt $record.Path $tag $nonce } catch { Write-NotifyLog "watch: $_" }
+}
+
+# Let the alert finish before the process exits.
+if ($soundStarted) {
+    $left = 2500 - ((Get-Date) - $soundStarted).TotalMilliseconds
+    if ($left -gt 0) { Start-Sleep -Milliseconds ([int]$left) }
 }
