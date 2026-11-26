@@ -3,14 +3,15 @@
 #
 #   -Kind attention  PermissionRequest: Claude needs approval, asks a question
 #                    (AskUserQuestion) or has a plan to review (ExitPlanMode).
-#                    Orange badge, stays on screen until dismissed, alert sound.
+#                    Orange badge and alert sound. The toast stays on screen until you
+#                    respond: the script keeps watching the session and removes it then.
 #   -Kind done       Stop: Claude finished its turn. Green badge, short toast, chime.
 #   -Kind answered   PostToolUse on AskUserQuestion: removes the question toast and
 #                    prints a recap of every question with all of its options.
 #
-# Toasts show the session name (the /rename name, else Claude's auto title), never
-# the question or the command. Reads the hook JSON on stdin and never blocks Claude:
-# errors go to %LOCALAPPDATA%\claude-code-doorbell\notify.log.
+# Toasts show the session name (the /rename name, else Claude's auto title), never the
+# question or the command. Reads the hook JSON on stdin and never blocks Claude: errors
+# go to %LOCALAPPDATA%\claude-code-doorbell\notify.log.
 param(
     [ValidateSet('attention', 'done', 'answered')]
     [string]$Kind = 'attention'
@@ -31,6 +32,10 @@ function Get-Setting([string]$name, [string]$default) {
 }
 
 function Test-Off([string]$name) { (Get-Setting $name '1') -in @('0', 'false', 'off', 'no') }
+
+# Debug logging: CC_NOTIFY_DEBUG=1, or an empty file named "debug" in the cache folder
+# (takes effect at once, without restarting Claude Code).
+function Test-Debug { (Get-Setting 'CC_NOTIFY_DEBUG' '0') -eq '1' -or (Test-Path (Join-Path $cache 'debug')) }
 
 function Write-NotifyLog([string]$msg) {
     try {
@@ -160,17 +165,23 @@ function Get-SessionTitle([string]$path) {
     return ''
 }
 
-# The short handle Claude Code gives each running session, e.g. "my-app-3f".
-function Get-SessionHandle([string]$sid) {
-    if (-not $sid) { return '' }
+# Claude Code's record of a running session, ~/.claude/sessions/<pid>.json: its short
+# handle (e.g. "my-app-3f") and its status ("busy"; "waiting" while a question or an
+# approval is open; "idle" between turns).
+function Get-SessionRecord([string]$sid) {
+    if (-not $sid) { return $null }
     $config = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
     foreach ($f in Get-ChildItem (Join-Path $config 'sessions') -Filter *.json -ErrorAction SilentlyContinue) {
         try {
             $s = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
-            if ($s.sessionId -eq $sid -and $s.name) { return [string]$s.name }
+            if ($s.sessionId -eq $sid) { return [pscustomobject]@{ Path = $f.FullName; Name = [string]$s.name } }
         } catch {}
     }
-    return ''
+    return $null
+}
+
+function Get-SessionStatus([string]$path) {
+    try { return [string](Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json).status } catch { return '' }
 }
 
 function Limit-Text([string]$s, [int]$max) {
@@ -191,8 +202,33 @@ function Sync-Assets {
     foreach ($name in 'icon.png', 'badge-done.png', 'badge-question.png', 'badge-approval.png') {
         $src = Join-Path $assets $name
         $dst = Join-Path $cache $name
-        if (-not (Test-Path $dst) -or (Get-Item $src).Length -ne (Get-Item $dst).Length) { Copy-Item $src $dst -Force }
+        if (-not (Test-Path $dst) -or (Get-FileHash $src).Hash -ne (Get-FileHash $dst).Hash) { Copy-Item $src $dst -Force }
     }
+}
+
+# Removes this prompt's toast as soon as the session stops waiting, that is, once you
+# answer, approve or reject. If the session never shows as waiting (a permission rule or
+# hook answered the prompt first), the toast is left for the Stop hook to clear.
+function Watch-Prompt([string]$path, [string]$tag, [string]$nonce) {
+    $debug = Test-Debug
+    $start = Get-Date
+    $sawWaiting = $false
+    $last = $null
+    while (((Get-Date) - $start).TotalMinutes -lt 60) {
+        if (-not (Test-Path -LiteralPath $path)) { if ($debug) { Write-NotifyLog 'watch: session record gone' }; break }
+        $status = Get-SessionStatus $path
+        if ($debug -and $status -ne $last) { Write-NotifyLog "watch: status '$status'"; $last = $status }
+        if ($status -eq 'waiting') { $sawWaiting = $true }
+        elseif ($status -and $sawWaiting) { break }
+        elseif (-not $sawWaiting -and ((Get-Date) - $start).TotalSeconds -gt 20) { if ($debug) { Write-NotifyLog 'watch: never waited, leaving the toast' }; return }
+        Start-Sleep -Milliseconds 300
+    }
+    # Only remove the toast if it is still this prompt's; a newer prompt replaces it.
+    $mine = @($history.GetHistory($appId) | Where-Object {
+        $_.Tag -eq $tag -and $_.Group -eq 'attention' -and $_.Content.DocumentElement.GetAttribute('launch') -like "*n=$nonce"
+    })
+    if ($debug) { Write-NotifyLog "watch: done, own toast still shown: $($mine.Count -gt 0)" }
+    if ($mine.Count) { $history.Remove($tag, 'attention', $appId) }
 }
 
 # Registers the app identity so the toast header shows the app name and icon.
@@ -283,9 +319,10 @@ if ($Kind -eq 'done') {
 }
 
 $sessionTitle = ''
-$handle = ''
+$record = $null
 try { $sessionTitle = Get-SessionTitle ([string]$data.transcript_path) } catch { Write-NotifyLog "title: $_" }
-try { $handle = Get-SessionHandle ([string]$data.session_id) } catch { Write-NotifyLog "handle: $_" }
+try { $record = Get-SessionRecord ([string]$data.session_id) } catch { Write-NotifyLog "session: $_" }
+$handle = if ($record) { $record.Name } else { '' }
 $project = if ($data.cwd) { Split-Path -Leaf ([string]$data.cwd) } else { '' }
 
 $body = if ($sessionTitle) { $sessionTitle } elseif ($handle) { $handle } elseif ($project) { $project } else { 'Claude Code session' }
@@ -296,6 +333,11 @@ $footer = if ($handle -and $handle -ne $body) { $handle } elseif ($project -ne $
 try {
     Sync-Assets
     Register-AppId
+
+    # An id carried in the toast lets the watcher tell this toast apart from a newer one
+    # for the same session. Clicking a toast does nothing, as before.
+    $nonce = [guid]::NewGuid().ToString('N').Substring(0, 12)
+    $launchAttrs = " launch=""n=$nonce"""
 
     $badgeUri = ([Uri](Join-Path $cache $badge)).AbsoluteUri
     $attribution = ''
@@ -312,7 +354,7 @@ try {
         }
     }
     $xml = @"
-<toast$toastAttrs>
+<toast$toastAttrs$launchAttrs>
   <visual>
     <binding template="ToastGeneric">
       <text>$(ConvertTo-XmlText $title)</text>
@@ -344,11 +386,26 @@ try {
     [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)
 } catch { Write-NotifyLog "toast: $_" }
 
-# --- Sound -----------------------------------------------------------------------------
+# --- Sound, then watch for your response -------------------------------------------------
 
+$soundStarted = $null
 if (-not (Test-Off 'CC_NOTIFY_SOUND')) {
     try {
         $sound = Get-Sound $(if ($Kind -eq 'done') { 'done' } else { 'attention' })
-        if ($sound) { (New-Object Media.SoundPlayer $sound).PlaySync() }
+        if ($sound) {
+            $player = New-Object Media.SoundPlayer $sound
+            # For a question or approval, play in the background so watching starts at once.
+            if ($Kind -eq 'attention') { $player.Play(); $soundStarted = Get-Date } else { $player.PlaySync() }
+        }
     } catch { Write-NotifyLog "sound: $_" }
+}
+
+if ($Kind -eq 'attention' -and $record -and $history -and -not (Test-Off 'CC_NOTIFY_AUTOCLEAR')) {
+    try { Watch-Prompt $record.Path $tag $nonce } catch { Write-NotifyLog "watch: $_" }
+}
+
+# Let the alert finish before the process exits.
+if ($soundStarted) {
+    $left = 2500 - ((Get-Date) - $soundStarted).TotalMilliseconds
+    if ($left -gt 0) { Start-Sleep -Milliseconds ([int]$left) }
 }
