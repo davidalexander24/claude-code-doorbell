@@ -9,9 +9,10 @@
 #   -Kind answered   PostToolUse on AskUserQuestion: removes the question toast and
 #                    prints a recap of every question with all of its options.
 #
-# Toasts show the session name (the /rename name, else Claude's auto title), never the
-# question or the command. Reads the hook JSON on stdin and never blocks Claude: errors
-# go to %LOCALAPPDATA%\claude-code-doorbell\notify.log.
+# Clicking a toast brings up the session's window and, in Windows Terminal and VS Code,
+# its tab (focusapp.cs). Toasts show the session name (the /rename name, else Claude's
+# auto title), never the question or the command. Reads the hook JSON on stdin and never
+# blocks Claude: errors go to %LOCALAPPDATA%\claude-code-doorbell\notify.log.
 param(
     [ValidateSet('attention', 'done', 'answered')]
     [string]$Kind = 'attention'
@@ -19,9 +20,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $appId = 'ClaudeCodeDoorbell'
+$activatorClsid = '{1C6EDB03-608D-455E-847C-2FE3331B1016}'   # PopupActivator in focusapp.cs
 $assets = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets'
 $cache = Join-Path $env:LOCALAPPDATA 'claude-code-doorbell'
 $log = Join-Path $cache 'notify.log'
+. (Join-Path $PSScriptRoot 'native.ps1')
 
 # --- Settings (environment variables, e.g. from the "env" block of settings.json) ---
 
@@ -196,7 +199,8 @@ function ConvertTo-XmlText([string]$s) { [Security.SecurityElement]::Escape($s) 
 # --- Assets and app identity ---------------------------------------------------------
 
 # Copies the icon and badges out of the plugin folder, whose path changes with each
-# version, so the registered icon and toasts in Action Center keep working after updates.
+# version, so the registered icon and toasts already in Action Center keep working
+# after updates.
 function Sync-Assets {
     if (-not (Test-Path $cache)) { New-Item -ItemType Directory -Force $cache | Out-Null }
     foreach ($name in 'icon.png', 'badge-done.png', 'badge-question.png', 'badge-approval.png') {
@@ -204,6 +208,36 @@ function Sync-Assets {
         $dst = Join-Path $cache $name
         if (-not (Test-Path $dst) -or (Get-FileHash $src).Hash -ne (Get-FileHash $dst).Hash) { Copy-Item $src $dst -Force }
     }
+}
+
+# Registers the click app (focusapp.cs, compiled on first use) as the app identity's
+# COM activator. When a toast is clicked, Windows starts it, hands it the toast's
+# arguments and lets it bring a window to the front, which Windows refuses to an app
+# started any other way while the clicked toast has the focus.
+function Register-Activator {
+    $exe = Get-DoorbellFocusApp $cache
+    $server = "HKCU:\Software\Classes\CLSID\$activatorClsid"
+    $command = '"{0}"' -f $exe
+    $current = if (Test-Path "$server\LocalServer32") { (Get-Item -Path "$server\LocalServer32").GetValue('') } else { $null }
+    if ($current -ne $command) {
+        # COM caches a server's path and only notices a new one when the key is recreated.
+        if (Test-Path $server) { Remove-Item -Path $server -Recurse -Force }
+        New-Item -Path "$server\LocalServer32" -Force | Out-Null
+        Set-ItemProperty -Path $server -Name '(default)' -Value 'Doorbell for Claude Code'
+        Set-ItemProperty -Path "$server\LocalServer32" -Name '(default)' -Value $command
+    }
+    $key = "HKCU:\Software\Classes\AppUserModelId\$appId"
+    if ((Get-ItemProperty -Path $key).CustomActivator -ne $activatorClsid) { Set-ItemProperty -Path $key -Name CustomActivator -Value $activatorClsid }
+}
+
+# The claude process running this session and the window it runs in, for the click
+# action; null if not found. The click finds the session's tab through that process's
+# console.
+function Get-SessionWindow {
+    Import-DoorbellNative $cache
+    $claude = [Doorbell.Native]::FindClaudeAncestor([uint32]$PID)
+    if (-not $claude) { return $null }
+    return [pscustomobject]@{ Pid = $claude; Hwnd = [Doorbell.Native]::HostWindow([uint32]$claude, [string]$data.cwd) }
 }
 
 # Removes this prompt's toast as soon as the session stops waiting, that is, once you
@@ -334,10 +368,22 @@ try {
     Sync-Assets
     Register-AppId
 
-    # An id carried in the toast lets the watcher tell this toast apart from a newer one
-    # for the same session. Clicking a toast does nothing, as before.
+    # Click action: the activator brings up the session's window and tab. The id (n)
+    # lets the watcher tell this toast apart from a newer one for the same session.
     $nonce = [guid]::NewGuid().ToString('N').Substring(0, 12)
-    $launchAttrs = " launch=""n=$nonce"""
+    $hostWindow = 0
+    $claudePid = 0
+    if (-not (Test-Off 'CC_NOTIFY_CLICK')) {
+        try { Register-Activator } catch { Write-NotifyLog "click app: $_" }
+        try {
+            $session = Get-SessionWindow
+            if ($session) { $claudePid = $session.Pid; $hostWindow = $session.Hwnd }
+        } catch { Write-NotifyLog "window: $_" }
+        if (-not $hostWindow) { Write-NotifyLog 'window: no window found for this session, so clicking this pop-up will do nothing' }
+        elseif (Test-Debug) { Write-NotifyLog "window: $hostWindow, claude process $claudePid" }
+    }
+    $launch = 'focus?hwnd={0}&pid={1}&title={2}&n={3}' -f $hostWindow, $claudePid, [Uri]::EscapeDataString($sessionTitle), $nonce
+    $launchAttrs = " launch=""$(ConvertTo-XmlText $launch)"""
 
     $badgeUri = ([Uri](Join-Path $cache $badge)).AbsoluteUri
     $attribution = ''

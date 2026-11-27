@@ -14,6 +14,7 @@ There are a few Windows notifiers for Claude Code. Doorbell is built around thes
 - **It tells you which session.** Each pop-up names the session (your `/rename` name, or Claude Code's own title), which matters when several are running at once.
 - **Your prompts stay off the screen.** The question or command never appears in the pop-up or the notification center.
 - **It rings until you answer, then stops.** Questions and approvals stay on screen while Claude waits and disappear the moment you respond in the terminal, whether you answer, approve or reject. Each session keeps at most one pop-up, so they never pile up.
+- **Click to go there.** Clicking a pop-up brings up that session's window and tab, in Windows Terminal or VS Code.
 - **You see every option you were offered.** After you answer a question, a recap lists all of its options with your picks marked.
 - **Nothing to install.** It runs on the PowerShell built into Windows, and the louder sounds are made on your machine from the standard Windows sounds.
 - **No cost to Claude's context.** It is hooks only, so it adds nothing to what Claude reads (`claude plugin details` puts it at about 0 tokens per session).
@@ -27,6 +28,7 @@ There are a few Windows notifiers for Claude Code. Doorbell is built around thes
 | Claude finishes its turn | green **✓** "Claude finished" | about 5 seconds | chime |
 
 - **Which session, at a glance.** Under the title, the pop-up shows the session's name and, in small grey text, the folder or session handle.
+- **Click to jump there.** Clicking a pop-up brings the session's window to the front, even when it was minimized. In Windows Terminal it also selects the session's tab. In VS Code it switches to the session's terminal tab and puts the cursor in it, ready for your answer. Other terminals (the classic console, other editors) come to the front as they were.
 - **Louder sounds.** The standard Windows sounds, boosted by 14 dB by default. The boosted copies are made on your machine the first time they play, so no sound files ship with the plugin.
 - **Question recap.** Claude Code normally keeps only "question → answer" once you reply. This adds every question with all of its options, your picks marked:
 
@@ -54,7 +56,7 @@ This started as two sound hooks in my own Claude Code settings, so I'd hear when
 
 - Windows 10 or 11, with the built-in Windows PowerShell 5.1. Nothing else to install.
 - A recent Claude Code with plugin support.
-- Tested on Windows 11 23H2 with Claude Code 2.1.330.
+- Tested on Windows 11 23H2 with Claude Code 2.1.332, in Windows Terminal and VS Code.
 
 ## Install
 
@@ -99,6 +101,7 @@ Everything works out of the box. To change something, set environment variables 
 | `CC_NOTIFY_DONE` | `1` | `0` turns off the "Claude finished" pop-up and chime. |
 | `CC_NOTIFY_PERSIST` | `1` | `0` lets question and approval pop-ups time out (about 25 seconds) instead of waiting for you. |
 | `CC_NOTIFY_AUTOCLEAR` | `1` | `0` keeps question and approval pop-ups up after you respond, until you dismiss them or the turn ends. |
+| `CC_NOTIFY_CLICK` | `1` | `0` turns off jumping to the session when you click a pop-up. |
 | `CC_NOTIFY_RECAP` | `1` | `0` turns off the question recap. |
 | `CC_NOTIFY_ATTENTION_SOUND` | `Windows Error.wav` | Path to your own `.wav` for questions and approvals. |
 | `CC_NOTIFY_DONE_SOUND` | `Windows Notify.wav` | Path to your own `.wav` for finished turns. |
@@ -117,9 +120,11 @@ The plugin adds three hooks, all running [`scripts/notify.ps1`](scripts/notify.p
 | `Stop` | Claude finishes its turn | "finished" pop-up, chime |
 | `PostToolUse` on `AskUserQuestion` | you answered a question | clears the question pop-up, prints the recap |
 
-Pop-ups use the Windows notification API through PowerShell's WinRT support, under an app identity registered at `HKCU\Software\Classes\AppUserModelId\ClaudeCodeDoorbell`. Boosted sounds and a copy of the icons are kept in `%LOCALAPPDATA%\claude-code-doorbell`, along with `notify.log` if anything goes wrong.
+Pop-ups use the Windows notification API through PowerShell's WinRT support, under an app identity registered at `HKCU\Software\Classes\AppUserModelId\ClaudeCodeDoorbell`. Boosted sounds, a copy of the icons and the click handler are kept in `%LOCALAPPDATA%\claude-code-doorbell`, along with `notify.log` if anything goes wrong.
 
 **Clearing when you respond.** Claude Code marks a session as `waiting` in `~/.claude/sessions` while a question or approval is open, and as busy again once you respond. After showing a question or approval pop-up, the hook keeps running in the background, checks that status a few times a second, and removes the pop-up as soon as the session stops waiting.
+
+**Click to jump there.** When the hook runs, it follows Claude Code's console to the window that shows it (Windows Terminal and VS Code both own the hidden pseudo-console window of each session they host; without a console, it takes the window named after the session's folder) and puts that window, the session's process and its title into the pop-up. Clicking the pop-up makes Windows start a small app registered as the app identity's COM activator (`CustomActivator`, with its class under `HKCU\Software\Classes\CLSID`). That is the route Windows offers desktop apps for notification clicks, and the only one that lets the app bring a window to the front while the clicked pop-up still has the focus. The app finds the session's tab through UI Automation and brings the window forward. To find the tab, it reads the title of the session's console, which is what the tab shows. In Windows Terminal it also adds a few invisible characters to that title for a moment, so the tab can be told apart from tabs with the same title (every session Claude Code has not named yet is called "Claude Code"). In VS Code it focuses the terminal's input as well. Its source is [`scripts/focusapp.cs`](scripts/focusapp.cs) and [`scripts/native.cs`](scripts/native.cs), compiled on your machine the first time a pop-up is shown.
 
 The session name and status come from the session's transcript and from `~/.claude/sessions`. These are Claude Code's internal files and may change between versions; if the name can't be found, the pop-up shows the folder name instead, and if the status can't be read, the pop-up clears when the turn ends.
 
@@ -128,7 +133,7 @@ The session name and status come from the session's transcript and from `~/.clau
 - **Windows only.**
 - **Do Not Disturb hides the banners.** With Do Not Disturb or Focus on, or Windows' automatic rules (for example while a game or full-screen app runs), notifications go straight to the notification center without popping up.
 - **The recap has a label you can't remove.** Claude Code puts `PostToolUse:AskUserQuestion says:` in front of anything a hook prints, and hooks can't hide it ([#99048](https://github.com/anthropics/claude-code/issues/99048)). Showing all options natively is requested in [#111703](https://github.com/anthropics/claude-code/issues/111703).
-- **Clicking a pop-up does nothing yet.** Jumping to the session's terminal tab on click is in progress on the [`feature/click-to-focus`](https://github.com/davidalexander24/claude-code-doorbell/tree/feature/click-to-focus) branch: selecting the right tab works, but Windows won't let the terminal come to the front while the clicked notification holds the focus.
+- **Finding the tab depends on its title.** If you rename a tab yourself, or turn off application titles in your Windows Terminal profile, a click brings up the window without switching tabs. In VS Code the same happens when two sessions have the same title, such as two that Claude Code has not named yet.
 - **No notifications in `claude -p`.** Background hooks are cancelled when a print-mode session exits.
 - **Duplicate browser notifications.** If you use Remote Control and have claude.ai open in a browser, claude.ai may send its own notifications too. Block notifications for claude.ai in that browser if you only want these.
 
@@ -150,11 +155,12 @@ No pop-up at all:
 claude plugin uninstall doorbell
 ```
 
-To also remove the cached sounds and icons and the app identity:
+To also remove the cached files, the app identity and the click handler's registration:
 
 ```powershell
 Remove-Item -Recurse "$env:LOCALAPPDATA\claude-code-doorbell"
 Remove-Item "HKCU:\Software\Classes\AppUserModelId\ClaudeCodeDoorbell"
+Remove-Item -Recurse "HKCU:\Software\Classes\CLSID\{1C6EDB03-608D-455E-847C-2FE3331B1016}"
 ```
 
 ## License

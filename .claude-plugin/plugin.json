@@ -1,6 +1,6 @@
 {
   "name": "doorbell",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Windows toast notifications and louder sounds when Claude needs you or finishes, plus a full recap of answered questions",
   "author": { "name": "David Alexander", "url": "https://github.com/davidalexander24" },
   "homepage": "https://github.com/davidalexander24/claude-code-doorbell",
